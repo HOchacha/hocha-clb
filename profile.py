@@ -1,29 +1,29 @@
-"""RDMA 처리량 실험용 CloudLab 프로필.
+"""RDMA throughput experiments: N bare-metal nodes on one (or two) experiment LANs.
 
-같은 클러스터의 베어메탈 노드 N대를 실험망 LAN 하나(선택 시 두 개)로 묶는다.
-저장소 기반 프로필로 쓰면 이 저장소가 각 노드의 /local/repository 에 복제된다.
+Repository-based profile: this repo is cloned to /local/repository on every node.
+Keep this file ASCII-only (CloudLab runs geni-lib profiles with Python 2).
 """
 import geni.portal as portal
 import geni.rspec.pg as pg
-import geni.rspec.emulab as emulab  # hardware_type 등 Emulab 확장
+import geni.rspec.emulab as emulab  # provides node.hardware_type
 
 pc = portal.Context()
 
-pc.defineParameter("n", "노드 수", portal.ParameterType.INTEGER, 2)
-pc.defineParameter("hw", "노드 타입 (예: d6515, c6525-100g, r6525, xl170)",
+pc.defineParameter("n", "Number of nodes", portal.ParameterType.INTEGER, 2)
+pc.defineParameter("hw", "Node type (e.g. d6515, c6525-100g, r6525, xl170)",
                    portal.ParameterType.NODETYPE, "d6515")
-pc.defineParameter("image", "디스크 이미지",
+pc.defineParameter("image", "Disk image",
                    portal.ParameterType.IMAGE,
                    "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD")
-pc.defineParameter("bw", "LAN 대역폭 (Kbps). 100G 포트를 잡으려면 100000000",
+pc.defineParameter("bw", "LAN bandwidth in Kbps (100000000 = 100G port)",
                    portal.ParameterType.BANDWIDTH, 100000000)
-pc.defineParameter("dual", "두 번째 LAN 추가 (d6515처럼 100G 포트가 둘인 노드에서 '다른 포트' 대조군용)",
+pc.defineParameter("dual", "Add a second LAN on the other NIC port (other-port control)",
                    portal.ParameterType.BOOLEAN, False)
-pc.defineParameter("disk", "/mydata 블록스토어 크기", portal.ParameterType.STRING, "100GB")
+pc.defineParameter("disk", "Size of /mydata blockstore", portal.ParameterType.STRING, "100GB")
 
 params = pc.bindParameters()
 if params.n < 2:
-    pc.reportError(portal.ParameterError("노드는 2대 이상이어야 한다", ["n"]))
+    pc.reportError(portal.ParameterError("Need at least 2 nodes", ["n"]))
 pc.verifyParameters()
 
 request = pc.makeRequestRSpec()
@@ -32,18 +32,18 @@ lans = []
 for k in range(2 if params.dual else 1):
     lan = request.LAN("lan%d" % k)
     lan.bandwidth = params.bw
-    lan.setNoBandwidthShaping()   # 지연 노드·셰이핑 없이 물리 링크 그대로
+    lan.setNoBandwidthShaping()   # physical link as-is, no shaping
     lans.append(lan)
 
 for i in range(params.n):
-    node = request.RawPC("node%d" % i)          # 베어메탈 (VM 아님)
+    node = request.RawPC("node%d" % i)          # bare metal, not a VM
     node.hardware_type = params.hw
     node.disk_image = params.image
     for k, lan in enumerate(lans):
         iface = node.addInterface("if%d" % k)
         iface.addAddress(pg.IPv4Address("10.10.%d.%d" % (k + 1, i + 1), "255.255.255.0"))
         lan.addInterface(iface)
-    bs = node.Blockstore("bs%d" % i, "/mydata")  # 결과 저장용 (실험 종료 시 사라진다)
+    bs = node.Blockstore("bs%d" % i, "/mydata")  # results; deleted when the experiment ends
     bs.size = params.disk
     node.addService(pg.Execute(
         shell="bash",
